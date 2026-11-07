@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PhishGuard AI</title>
+<style>
+  body { font-family: Segoe UI, sans-serif; background: #f0f4fb; margin: 0;
+         display: flex; justify-content: center; padding: 40px 16px; }
+  .card { background: #fff; border-radius: 16px; padding: 28px;
+          max-width: 720px; width: 100%; box-shadow: 0 4px 20px rgba(0,0,0,.08); }
+  h1 { margin: 0 0 4px; font-size: 24px; }
+  p.sub { color: #667; margin: 0 0 20px; font-size: 14px; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 20px; }
+  .tab { padding: 8px 16px; border-radius: 20px; border: 1px solid #ccd;
+         background: #fff; cursor: pointer; font-size: 14px; }
+  .tab.active { background: #1e3a8a; color: #fff; border-color: #1e3a8a; }
+  .panel { display: none; }
+  .panel.active { display: block; }
+  input, textarea { width: 100%; padding: 12px; border: 1px solid #ccd;
+          border-radius: 10px; font-size: 15px; box-sizing: border-box;
+          font-family: inherit; }
+  textarea { height: 200px; resize: vertical; font-size: 14px; }
+  .btn { margin: 12px 8px 0 0; padding: 10px 20px; border: 0; border-radius: 10px;
+         background: #1e3a8a; color: #fff; font-size: 14px; cursor: pointer; }
+  .btn.alt { background: #e8edf8; color: #1e3a8a; }
+  .result { margin-top: 24px; display: none; }
+  .badge { display: inline-block; padding: 8px 16px; border-radius: 20px;
+           font-weight: 700; }
+  .bad { background: #fde8e8; color: #c81e1e; }
+  .good { background: #e3f8ec; color: #1a7f45; }
+  .warn { background: #fef3c7; color: #b45309; }
+  .bar { height: 12px; background: #e5e7eb; border-radius: 6px; margin: 14px 0 6px;
+         overflow: hidden; }
+  .fill { height: 100%; width: 0; transition: width .5s; }
+  small { color: #667; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+           gap: 10px; margin: 18px 0; }
+  .stat { background: #f3f6fc; border-radius: 12px; padding: 12px; text-align: center; }
+  .stat b { display: block; font-size: 22px; }
+  .stat span { font-size: 12px; color: #667; }
+  .crow { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
+  .clabel { width: 120px; font-size: 13px; color: #445; }
+  .ctrack { flex: 1; height: 14px; background: #e5e7eb; border-radius: 7px; overflow: hidden; }
+  .cfill { height: 100%; }
+  .dtitle { margin-top: 16px; font-weight: 700; font-size: 14px; }
+  ul { margin: 6px 0 0; padding-left: 20px; font-size: 13px; color: #334; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>PhishGuard AI</h1>
+  <p class="sub">Deteksi phishing dari URL atau isi email</p>
+
+  <div class="tabs">
+    <div class="tab active" id="tab-url" onclick="showTab('url')">URL Checker</div>
+    <div class="tab" id="tab-email" onclick="showTab('email')">Email Inspector</div>
+  </div>
+
+  <!-- Panel URL -->
+  <div class="panel active" id="panel-url">
+    <input id="url" placeholder="contoh: http://paypal-secure-login.verify-account.com">
+    <button class="btn" onclick="analyzeUrl()">Analyze URL</button>
+    <div class="result" id="result">
+      <span id="label" class="badge"></span>
+      <div class="bar"><div id="fill" class="fill"></div></div>
+      <div>Risk score: <b id="score"></b>%</div>
+      <small id="reason"></small>
+    </div>
+  </div>
+
+  <!-- Panel Email -->
+  <div class="panel" id="panel-email">
+    <textarea id="email" placeholder="Tempel isi email lengkap, termasuk baris From: dan Subject:"></textarea>
+    <button class="btn" onclick="analyzeEmail()">Analyze Email</button>
+    <button class="btn alt" onclick="loadSample('phishing')">Load Phishing Sample</button>
+    <button class="btn alt" onclick="loadSample('legit')">Load Legit Sample</button>
+
+    <div class="result" id="e-result">
+      <span id="e-label" class="badge"></span>
+      <div class="bar"><div id="e-fill" class="fill"></div></div>
+      <div>Risk score: <b id="e-score"></b>%</div>
+      <div class="stats" id="e-stats"></div>
+      <div id="e-chart"></div>
+      <div id="e-details"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const SAMPLES = {
+  phishing: `From: "PayPal Security" <security@paypal-verification.com>
+Subject: URGENT: Your account has been restricted
+
+Dear Valued Customer,
+
+We noticed unusual activity on your PayPal account. To avoid permanent
+suspension, you must verify your identity immediately.
+
+Click here to confirm your account:
+http://paypal-secure-login.verify-account-now.com/confirm
+Please enter your password and card number to restore access.`,
+  legit: `From: "Tokopedia" <info@tokopedia.com>
+Subject: Pesanan kamu sudah dikirim
+
+Halo, pesanan #12345 kamu sudah dikirim.
+Lacak paket kamu di https://www.tokopedia.com/order/12345
+Terima kasih sudah berbelanja.`
+};
+
+function showTab(name) {
+  for (const t of ["url", "email"]) {
+    document.getElementById("tab-" + t).classList.toggle("active", t === name);
+    document.getElementById("panel-" + t).classList.toggle("active", t === name);
+  }
+}
+
+function levelOf(label) {
+  return label === "LEGIT" ? "good" : label === "SUSPICIOUS" ? "warn" : "bad";
+}
+const ICONS = {good: "✓ ", warn: "? ", bad: "⚠ "};
+const COLORS = {good: "#22c55e", warn: "#f59e0b", bad: "#ef4444"};
+
+function paintBadge(prefix, data) {
+  const level = levelOf(data.label);
+  const label = document.getElementById(prefix + "label");
+  label.textContent = ICONS[level] + data.label;
+  label.className = "badge " + level;
+  const fill = document.getElementById(prefix + "fill");
+  fill.style.width = data.risk_score + "%";
+  fill.style.background = COLORS[level];
+  document.getElementById(prefix + "score").textContent = data.risk_score;
+}
+
+async function postJson(path, body) {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(body)
+  });
+  return res.json();
+}
+
+async function analyzeUrl() {
+  const data = await postJson("/analyze", {url: document.getElementById("url").value});
+  if (data.error) { alert(data.error); return; }
+  paintBadge("", data);
+  document.getElementById("reason").textContent = data.reason;
+  document.getElementById("result").style.display = "block";
+}
+
+function loadSample(kind) {
+  document.getElementById("email").value = SAMPLES[kind];
+}
+
+function addSection(container, title, items) {
+  if (!items.length) return;
+  const h = document.createElement("div");
+  h.className = "dtitle";
+  h.textContent = title;
+  const ul = document.createElement("ul");
+  items.forEach(t => {
+    const li = document.createElement("li");
+    li.textContent = t;
+    ul.appendChild(li);
+  });
+  container.append(h, ul);
+}
+
+async function analyzeEmail() {
+  const data = await postJson("/analyze_email", {text: document.getElementById("email").value});
+  if (data.error) { alert(data.error); return; }
+  paintBadge("e-", data);
+  if (data.label === "LEGIT") {
+    document.getElementById("e-label").textContent = "✓ LOW RISK (tidak ada indikator)";
+  }
+
+  // Kartu angka
+  const counts = data.indicator_counts;
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+  const stats = [
+    ["Total indikator", total],
+    ["Links found", data.links_found],
+    ["Suspicious links", data.suspicious_links.length],
+    ["Urgent triggers", data.urgent_triggers.length],
+  ];
+  const statsBox = document.getElementById("e-stats");
+  statsBox.replaceChildren();
+  stats.forEach(([name, n]) => {
+    const d = document.createElement("div");
+    d.className = "stat";
+    const b = document.createElement("b");
+    b.textContent = n;
+    const s = document.createElement("span");
+    s.textContent = name;
+    d.append(b, s);
+    statsBox.appendChild(d);
+  });
+
+  // Grafik batang indikator
+  const chart = document.getElementById("e-chart");
+  chart.replaceChildren();
+  const ORDER = ["Urgency", "Sensitive Info", "Spoofing", "Suspicious Links"];
+  const entries = ORDER.map(k => [k, counts[k]]);
+  const max = Math.max(4, ...entries.map(e => e[1]));
+  const colors = ["#f97316", "#ef4444", "#8b5cf6", "#06b6d4"];
+  entries.forEach(([name, n], i) => {
+    const row = document.createElement("div");
+    row.className = "crow";
+    const lab = document.createElement("span");
+    lab.className = "clabel";
+    lab.textContent = name;
+    const track = document.createElement("div");
+    track.className = "ctrack";
+    const f = document.createElement("div");
+    f.className = "cfill";
+    f.style.width = (n / max * 100) + "%";
+    f.style.background = colors[i % colors.length];
+    track.appendChild(f);
+    const val = document.createElement("b");
+    val.textContent = n;
+    row.append(lab, track, val);
+    chart.appendChild(row);
+  });
+
+  // Rincian
+  const details = document.getElementById("e-details");
+  details.replaceChildren();
+  addSection(details, "Indikator spoofing", data.spoofing_flags);
+  addSection(details, "Permintaan data sensitif", data.sensitive_requests);
+  addSection(details, "Frasa mendesak", data.urgent_triggers);
+  addSection(details, "Link mencurigakan",
+    data.suspicious_links.map(l => l.url + " (skor " + l.risk_score + "%)"));
+
+  document.getElementById("e-result").style.display = "block";
+}
+</script>
+</body>
+</html>
